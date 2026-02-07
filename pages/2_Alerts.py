@@ -1,5 +1,6 @@
 """Hansard Tracker — Alerts page."""
 
+import os
 import streamlit as st
 from app.hansard_client import search_members
 from app.alerts import create_alert, get_alerts, delete_alert, toggle_alert, check_alerts
@@ -8,7 +9,7 @@ st.set_page_config(page_title="Alerts — Hansard Tracker", page_icon="🔔", la
 
 st.title("🔔 Alerts")
 st.markdown(
-    "Get notified whenever an MP speaks in Parliament, with a direct link to the Hansard record."
+    "Get notified whenever an MP speaks in Parliament about topics you care about."
 )
 
 # ─── Create new alert ───────────────────────────────────────────────────────
@@ -62,12 +63,47 @@ with st.expander("**Create new alert**", expanded=True):
             help="We'll send notifications here when this MP speaks.",
         )
 
+        st.markdown("#### Filter by topics (optional)")
+        st.caption(
+            "Add topics to only get notified when the MP speaks about things you care about. "
+            "Leave blank to get notified about everything they say."
+        )
+
+        if os.getenv("GEMINI_API_KEY"):
+            topics_input = st.text_input(
+                "Topics (comma-separated)",
+                placeholder="e.g. housing, NHS, immigration",
+                help="AI will check each new speech to see if it's genuinely about these topics.",
+            )
+        else:
+            topics_input = ""
+            st.info(
+                "💡 **Topic filtering requires a Gemini API key.** "
+                "Without it, you'll be notified about all speeches. "
+                "Add `GEMINI_API_KEY` in your Streamlit secrets to enable this."
+            )
+
         if st.button("Create alert", type="primary"):
             if not alert_email:
                 st.warning("Please enter an email address.")
             else:
-                alert = create_alert(member.id, member.name, alert_email)
-                st.success(f"Alert created for **{member.name}**! Notifications will be sent to {alert_email}.")
+                # Parse topics
+                topics = []
+                if topics_input:
+                    topics = [t.strip() for t in topics_input.split(",") if t.strip()]
+
+                alert = create_alert(member.id, member.name, alert_email, topics=topics)
+
+                if topics:
+                    st.success(
+                        f"Alert created for **{member.name}**! "
+                        f"Notifications about **{', '.join(topics)}** will be sent to {alert_email}."
+                    )
+                else:
+                    st.success(
+                        f"Alert created for **{member.name}**! "
+                        f"Notifications will be sent to {alert_email}."
+                    )
                 # Clear selection state
                 del st.session_state["alert_selected_member"]
                 if "alert_members" in st.session_state:
@@ -96,6 +132,7 @@ if not all_alerts:
 else:
     for alert in all_alerts:
         is_active = alert.get("active", True)
+        topics = alert.get("topics", [])
 
         with st.container():
             col_info, col_actions = st.columns([4, 2])
@@ -104,9 +141,12 @@ else:
                 status_emoji = "🟢" if is_active else "⏸️"
                 status_text = "Active" if is_active else "Paused"
                 st.markdown(f"{status_emoji} **{alert['member_name']}** — {status_text}")
-                st.caption(
-                    f"Notifying {alert['email']} · Last checked: {alert['last_checked'][:16]}"
-                )
+
+                detail_parts = [f"Notifying {alert['email']}"]
+                if topics:
+                    detail_parts.append(f"Topics: {', '.join(topics)}")
+                detail_parts.append(f"Last checked: {alert['last_checked'][:16]}")
+                st.caption(" · ".join(detail_parts))
 
             with col_actions:
                 col_toggle, col_delete = st.columns(2)

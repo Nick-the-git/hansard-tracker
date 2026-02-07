@@ -1,12 +1,22 @@
 """Hansard Tracker — Search page."""
 
+import os
 import streamlit as st
 from app.hansard_client import search_members, get_member_contributions
+from app.llm import rank_contributions
 
 st.set_page_config(page_title="Search — Hansard Tracker", page_icon="🔍", layout="wide")
 
 st.title("🔍 Search Hansard")
 st.markdown("Find what an MP has said about any topic in Parliament.")
+
+# Check for API key
+if not os.getenv("GEMINI_API_KEY"):
+    st.warning(
+        "**Gemini API key not set.** Get a free key at "
+        "[Google AI Studio](https://aistudio.google.com/apikey) "
+        "and add it as `GEMINI_API_KEY` in your environment or Streamlit secrets."
+    )
 
 # ─── Step 1: Find the MP ────────────────────────────────────────────────────
 
@@ -63,58 +73,93 @@ if "selected_member" in st.session_state:
     )
 
     topic = st.text_input(
-        "Enter a topic or keywords",
+        "Enter a topic — can be natural language, the AI will understand what you mean",
         placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times",
     )
 
-    num_results = st.number_input("Number of results", min_value=1, max_value=100, value=10)
+    col_num, col_fetch = st.columns(2)
+    with col_num:
+        num_results = st.number_input("Max results", min_value=1, max_value=20, value=10)
+    with col_fetch:
+        num_to_scan = st.selectbox(
+            "Speeches to scan",
+            options=[50, 100],
+            index=1,
+            format_func=lambda x: f"Last {x} speeches",
+            help="How many of their most recent speeches to scan for relevance.",
+        )
 
     if st.button("Search Hansard", type="primary", use_container_width=True):
         if not topic:
             st.warning("Please enter a topic to search for.")
+        elif not os.getenv("GEMINI_API_KEY"):
+            st.error("Please set your GEMINI_API_KEY first.")
         else:
-            with st.spinner(f"Searching Hansard for {member.name}'s speeches on \"{topic}\"..."):
+            # Step 1: Fetch recent speeches from Hansard
+            with st.spinner(f"Fetching {member.name}'s last {num_to_scan} speeches from Hansard..."):
                 try:
                     contributions = get_member_contributions(
                         member_id=member.id,
-                        search_term=topic,
-                        take=num_results,
+                        take=num_to_scan,
                         filter_short=True,
                     )
                 except Exception as e:
-                    st.error(f"Error searching Hansard: {e}")
+                    st.error(f"Error fetching from Hansard: {e}")
                     contributions = []
 
-            st.divider()
-            st.markdown(f'### Results for "{topic}"')
+            if contributions:
+                # Step 2: Send to Gemini for ranking
+                with st.spinner(f"AI is reading {len(contributions)} speeches and finding ones about \"{topic}\"..."):
+                    try:
+                        results = rank_contributions(
+                            contributions=contributions,
+                            topic=topic,
+                            member_name=member.name,
+                            max_results=num_results,
+                        )
+                    except Exception as e:
+                        st.error(f"Error from Gemini: {e}")
+                        results = []
 
-            if not contributions:
-                st.info(
-                    f"No speeches found where **{member.name}** discussed \"{topic}\". "
-                    f"Try different keywords or a broader topic."
-                )
+                # ─── Display results ─────────────────────────────────────
+
+                st.divider()
+
+                st.markdown(f'### Results for "{topic}"')
+                st.caption(f"Scanned {len(contributions)} recent speeches, found {len(results)} relevant")
+
+                if not results:
+                    st.info(
+                        f"None of **{member.name}**'s last {len(contributions)} speeches "
+                        f"were about \"{topic}\". They may not have spoken about this recently."
+                    )
+                else:
+                    for r in results:
+                        rank = r["rank"]
+                        date = r.get("sitting_date", "").split("T")[0] if r.get("sitting_date") else "Unknown"
+                        text = r["text"]
+                        display_text = text[:600] + "..." if len(text) > 600 else text
+
+                        with st.container():
+                            col_rank, col_content = st.columns([0.3, 5])
+                            with col_rank:
+                                st.markdown(
+                                    f'<div style="background:#1d70b8; color:white; '
+                                    f'width:36px; height:36px; border-radius:50%; '
+                                    f'display:flex; align-items:center; justify-content:center; '
+                                    f'font-weight:bold; font-size:16px; margin-top:4px;">{rank}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with col_content:
+                                st.markdown(f"**{r.get('debate_title', 'Unknown debate')}**")
+                                st.caption(f"{date} · {r.get('section', '')} · {r.get('house', '')}")
+
+                            st.markdown(display_text)
+
+                            if r.get("relevance"):
+                                st.caption(f"🤖 *{r['relevance']}*")
+
+                            st.markdown(f"[Read full debate on Hansard →]({r.get('hansard_url', '#')})")
+                            st.divider()
             else:
-                st.caption(f"Showing {len(contributions)} results")
-
-                for i, c in enumerate(contributions, 1):
-                    date = c.sitting_date.split("T")[0] if c.sitting_date else "Unknown"
-                    text = c.text
-                    display_text = text[:600] + "..." if len(text) > 600 else text
-
-                    with st.container():
-                        col_rank, col_content = st.columns([0.3, 5])
-                        with col_rank:
-                            st.markdown(
-                                f'<div style="background:#1d70b8; color:white; '
-                                f'width:36px; height:36px; border-radius:50%; '
-                                f'display:flex; align-items:center; justify-content:center; '
-                                f'font-weight:bold; font-size:16px; margin-top:4px;">{i}</div>',
-                                unsafe_allow_html=True,
-                            )
-                        with col_content:
-                            st.markdown(f"**{c.debate_title or 'Unknown debate'}**")
-                            st.caption(f"{date} · {c.section} · {c.house}")
-
-                        st.markdown(display_text)
-                        st.markdown(f"[Read full debate on Hansard →]({c.hansard_url})")
-                        st.divider()
+                st.warning("No contributions found for this member.")

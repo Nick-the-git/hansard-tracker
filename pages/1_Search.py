@@ -72,6 +72,11 @@ if "selected_member" in st.session_state:
         unsafe_allow_html=True,
     )
 
+    topic = st.text_input(
+        "Topic",
+        placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times",
+    )
+
     topic_context = st.text_area(
         "What do you mean by this? (optional but helps accuracy)",
         placeholder="e.g. I mean social investment as in impact investing, social enterprises, community interest companies — NOT general government spending on public services",
@@ -91,14 +96,9 @@ if "selected_member" in st.session_state:
             help="How many of their most recent speeches to scan for relevance. Higher = goes further back in time but takes longer.",
         )
 
-    with st.form("search_form"):
-        topic = st.text_input(
-            "Topic",
-            placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times",
-        )
-        search_submitted = st.form_submit_button("Search Hansard", type="primary", use_container_width=True)
+    search_clicked_topic = st.button("Search Hansard", type="primary", use_container_width=True)
 
-    if search_submitted:
+    if search_clicked_topic:
         if not topic:
             st.warning("Please enter a topic to search for.")
         elif not os.getenv("GEMINI_API_KEY"):

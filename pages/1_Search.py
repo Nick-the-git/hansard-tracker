@@ -9,6 +9,7 @@ st.set_page_config(page_title="Search — Hansard Tracker", page_icon="🔍", la
 
 st.title("🔍 Search Hansard")
 st.markdown("Find what an MP has said about any topic in Parliament.")
+st.caption("Note: pressing enter doesn't work, you need to click the buttons with your mouse.")
 
 # Check for API key
 if not os.getenv("GEMINI_API_KEY"):

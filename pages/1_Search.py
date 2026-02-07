@@ -73,8 +73,15 @@ if "selected_member" in st.session_state:
     )
 
     topic = st.text_input(
-        "Enter a topic — can be natural language, the AI will understand what you mean",
+        "Topic",
         placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times",
+    )
+
+    topic_context = st.text_area(
+        "What do you mean by this? (optional but helps accuracy)",
+        placeholder="e.g. I mean social investment as in impact investing, social enterprises, community interest companies — NOT general government spending on public services",
+        height=80,
+        help="Give the AI more context about what you're looking for. This is especially useful for ambiguous terms.",
     )
 
     col_num, col_fetch = st.columns(2)
@@ -117,6 +124,7 @@ if "selected_member" in st.session_state:
                             topic=topic,
                             member_name=member.name,
                             max_results=num_results,
+                            topic_context=topic_context if topic_context else None,
                         )
                     except Exception as e:
                         st.error(f"Gemini error: {e}")

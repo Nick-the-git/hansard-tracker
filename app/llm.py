@@ -60,11 +60,20 @@ def _build_rank_prompt(
     topic: str,
     member_name: str,
     max_results: int,
+    topic_context: Optional[str] = None,
 ) -> str:
     """Build the ranking prompt."""
+    context_block = ""
+    if topic_context:
+        context_block = f"""
+IMPORTANT — the user has clarified what they mean by "{topic}":
+"{topic_context}"
+Use this definition to judge relevance. Speeches that don't match this specific meaning should be excluded even if they use similar words.
+"""
+
     return f"""I have {num_speeches} parliamentary speeches by {member_name}.
 I need you to identify which ones are genuinely relevant to this topic: "{topic}"
-
+{context_block}
 Here are the speeches:
 {speeches_text}
 
@@ -102,6 +111,7 @@ def rank_contributions(
     topic: str,
     member_name: str,
     max_results: int = 10,
+    topic_context: Optional[str] = None,
 ) -> list[dict]:
     """
     Use Gemini to rank contributions by relevance to a topic.
@@ -131,7 +141,7 @@ def rank_contributions(
             text = c.text[:1000] if len(c.text) > 1000 else c.text
             speeches_text += f"\n--- SPEECH {i} ---\nDate: {date}\nDebate: {c.debate_title}\nText: {text}\n"
 
-        prompt = _build_rank_prompt(speeches_text, len(batch), topic, member_name, max_results)
+        prompt = _build_rank_prompt(speeches_text, len(batch), topic, member_name, max_results, topic_context)
         raw = _call_gemini(client, prompt)
         results = _parse_rank_response(raw)
 

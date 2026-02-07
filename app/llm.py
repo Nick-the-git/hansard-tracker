@@ -50,44 +50,28 @@ def _call_gemini(client: genai.Client, prompt: str, max_retries: int = 2) -> str
     return ""  # Should not reach here
 
 
-def rank_contributions(
-    contributions: list[Contribution],
+# Max speeches per Gemini call — keeps prompts within token limits
+_BATCH_SIZE = 80
+
+
+def _build_rank_prompt(
+    speeches_text: str,
+    num_speeches: int,
     topic: str,
     member_name: str,
-    max_results: int = 10,
-) -> list[dict]:
-    """
-    Use Gemini to rank contributions by relevance to a topic.
-
-    Sends all contributions to the LLM and asks it to:
-    1. Identify which ones are genuinely about the topic
-    2. Rank them by relevance
-    3. Drop anything irrelevant
-
-    Returns a list of dicts with contribution_id, rank, and explanation.
-    """
-    if not contributions:
-        return []
-
-    client = _get_client()
-
-    # Build the speeches list for the prompt
-    speeches_text = ""
-    for i, c in enumerate(contributions):
-        date = c.sitting_date.split("T")[0] if c.sitting_date else "Unknown"
-        # Truncate very long speeches to stay within context limits
-        text = c.text[:1000] if len(c.text) > 1000 else c.text
-        speeches_text += f"\n--- SPEECH {i} ---\nDate: {date}\nDebate: {c.debate_title}\nText: {text}\n"
-
-    prompt = f"""I have {len(contributions)} parliamentary speeches by {member_name}.
+    max_results: int,
+) -> str:
+    """Build the ranking prompt."""
+    return f"""I have {num_speeches} parliamentary speeches by {member_name}.
 I need you to identify which ones are genuinely relevant to this topic: "{topic}"
 
 Here are the speeches:
 {speeches_text}
 
 Instructions:
-- Only include speeches that are GENUINELY about or substantially related to "{topic}"
-- Do NOT include speeches that merely mention a word in passing or in an unrelated context
+- Only include speeches that are GENUINELY and DIRECTLY about "{topic}"
+- Do NOT include speeches that merely mention a related word in passing or in an unrelated context
+- A speech about general government spending is NOT about "{topic}" unless it specifically discusses "{topic}"
 - Rank the relevant ones from most relevant to least relevant
 - Return at most {max_results} results
 - If none are relevant, return an empty list
@@ -98,30 +82,71 @@ Return ONLY valid JSON in this exact format, no other text:
   {{"speech_index": 3, "relevance": "brief explanation"}}
 ]}}"""
 
-    raw = _call_gemini(client, prompt)
 
-    # Parse the response
+def _parse_rank_response(raw: str) -> list[dict]:
+    """Parse a ranking response from Gemini."""
     try:
         response_text = raw.strip()
-        # Handle markdown code blocks
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1]
             response_text = response_text.rsplit("```", 1)[0]
-
         data = json.loads(response_text)
-        ranked_indices = data.get("results", [])
+        return data.get("results", [])
     except (json.JSONDecodeError, AttributeError) as e:
         logger.error(f"Failed to parse Gemini response: {e}\nResponse: {raw}")
         return []
 
-    # Map indices back to contributions
-    output = []
-    for rank, item in enumerate(ranked_indices, 1):
-        idx = item.get("speech_index")
-        if idx is None or idx < 0 or idx >= len(contributions):
-            continue
 
-        c = contributions[idx]
+def rank_contributions(
+    contributions: list[Contribution],
+    topic: str,
+    member_name: str,
+    max_results: int = 10,
+) -> list[dict]:
+    """
+    Use Gemini to rank contributions by relevance to a topic.
+
+    For large sets of contributions, processes in batches to stay within
+    token limits, then returns the top results across all batches.
+    """
+    if not contributions:
+        return []
+
+    client = _get_client()
+
+    # Split into batches
+    batches = []
+    for start in range(0, len(contributions), _BATCH_SIZE):
+        batches.append(contributions[start : start + _BATCH_SIZE])
+
+    # Process each batch — collect all candidates with their original index
+    all_candidates = []
+
+    for batch_idx, batch in enumerate(batches):
+        offset = batch_idx * _BATCH_SIZE
+
+        speeches_text = ""
+        for i, c in enumerate(batch):
+            date = c.sitting_date.split("T")[0] if c.sitting_date else "Unknown"
+            text = c.text[:1000] if len(c.text) > 1000 else c.text
+            speeches_text += f"\n--- SPEECH {i} ---\nDate: {date}\nDebate: {c.debate_title}\nText: {text}\n"
+
+        prompt = _build_rank_prompt(speeches_text, len(batch), topic, member_name, max_results)
+        raw = _call_gemini(client, prompt)
+        results = _parse_rank_response(raw)
+
+        for item in results:
+            idx = item.get("speech_index")
+            if idx is not None and 0 <= idx < len(batch):
+                all_candidates.append({
+                    "original_index": offset + idx,
+                    "relevance": item.get("relevance", ""),
+                })
+
+    # Map back to contributions and assign final ranks
+    output = []
+    for rank, candidate in enumerate(all_candidates[:max_results], 1):
+        c = contributions[candidate["original_index"]]
         output.append({
             "rank": rank,
             "contribution_id": c.contribution_id,
@@ -133,7 +158,7 @@ Return ONLY valid JSON in this exact format, no other text:
             "section": c.section,
             "hansard_url": c.hansard_url,
             "member_name": c.member_name,
-            "relevance": item.get("relevance", ""),
+            "relevance": candidate["relevance"],
         })
 
     return output

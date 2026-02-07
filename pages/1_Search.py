@@ -83,10 +83,10 @@ if "selected_member" in st.session_state:
     with col_fetch:
         num_to_scan = st.selectbox(
             "Speeches to scan",
-            options=[50, 100],
+            options=[50, 100, 200, 500],
             index=1,
             format_func=lambda x: f"Last {x} speeches",
-            help="How many of their most recent speeches to scan for relevance.",
+            help="How many of their most recent speeches to scan for relevance. Higher = goes further back in time but takes longer.",
         )
 
     if st.button("Search Hansard", type="primary", use_container_width=True):

@@ -109,7 +109,8 @@ if "selected_member" in st.session_state:
 
             if contributions:
                 # Step 2: Send to Gemini for ranking
-                with st.spinner(f"AI is reading {len(contributions)} speeches and finding ones about \"{topic}\"..."):
+                gemini_error = False
+                with st.spinner(f"AI is reading {len(contributions)} speeches and finding ones about \"{topic}\" (may take up to a minute if rate limited)..."):
                     try:
                         results = rank_contributions(
                             contributions=contributions,
@@ -118,48 +119,52 @@ if "selected_member" in st.session_state:
                             max_results=num_results,
                         )
                     except Exception as e:
-                        st.error(f"Error from Gemini: {e}")
+                        st.error(f"Gemini error: {e}")
                         results = []
+                        gemini_error = True
 
                 # ─── Display results ─────────────────────────────────────
 
-                st.divider()
-
-                st.markdown(f'### Results for "{topic}"')
-                st.caption(f"Scanned {len(contributions)} recent speeches, found {len(results)} relevant")
-
-                if not results:
-                    st.info(
-                        f"None of **{member.name}**'s last {len(contributions)} speeches "
-                        f"were about \"{topic}\". They may not have spoken about this recently."
-                    )
+                if gemini_error:
+                    st.warning("The AI couldn't process the speeches. Try again in a minute — this is usually a temporary rate limit.")
                 else:
-                    for r in results:
-                        rank = r["rank"]
-                        date = r.get("sitting_date", "").split("T")[0] if r.get("sitting_date") else "Unknown"
-                        text = r["text"]
-                        display_text = text[:600] + "..." if len(text) > 600 else text
+                    st.divider()
 
-                        with st.container():
-                            col_rank, col_content = st.columns([0.3, 5])
-                            with col_rank:
-                                st.markdown(
-                                    f'<div style="background:#1d70b8; color:white; '
-                                    f'width:36px; height:36px; border-radius:50%; '
-                                    f'display:flex; align-items:center; justify-content:center; '
-                                    f'font-weight:bold; font-size:16px; margin-top:4px;">{rank}</div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with col_content:
-                                st.markdown(f"**{r.get('debate_title', 'Unknown debate')}**")
-                                st.caption(f"{date} · {r.get('section', '')} · {r.get('house', '')}")
+                    st.markdown(f'### Results for "{topic}"')
+                    st.caption(f"Scanned {len(contributions)} recent speeches, found {len(results)} relevant")
 
-                            st.markdown(display_text)
+                    if not results:
+                        st.info(
+                            f"None of **{member.name}**'s last {len(contributions)} speeches "
+                            f"were about \"{topic}\". They may not have spoken about this recently."
+                        )
+                    else:
+                        for r in results:
+                            rank = r["rank"]
+                            date = r.get("sitting_date", "").split("T")[0] if r.get("sitting_date") else "Unknown"
+                            text = r["text"]
+                            display_text = text[:600] + "..." if len(text) > 600 else text
 
-                            if r.get("relevance"):
-                                st.caption(f"🤖 *{r['relevance']}*")
+                            with st.container():
+                                col_rank, col_content = st.columns([0.3, 5])
+                                with col_rank:
+                                    st.markdown(
+                                        f'<div style="background:#1d70b8; color:white; '
+                                        f'width:36px; height:36px; border-radius:50%; '
+                                        f'display:flex; align-items:center; justify-content:center; '
+                                        f'font-weight:bold; font-size:16px; margin-top:4px;">{rank}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                with col_content:
+                                    st.markdown(f"**{r.get('debate_title', 'Unknown debate')}**")
+                                    st.caption(f"{date} · {r.get('section', '')} · {r.get('house', '')}")
 
-                            st.markdown(f"[Read full debate on Hansard →]({r.get('hansard_url', '#')})")
-                            st.divider()
+                                st.markdown(display_text)
+
+                                if r.get("relevance"):
+                                    st.caption(f"🤖 *{r['relevance']}*")
+
+                                st.markdown(f"[Read full debate on Hansard →]({r.get('hansard_url', '#')})")
+                                st.divider()
             else:
                 st.warning("No contributions found for this member.")

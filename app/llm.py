@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import logging
+import time
 from typing import Optional
 
 from google import genai
@@ -24,6 +25,29 @@ def _get_client() -> genai.Client:
             "GEMINI_API_KEY not set. Get a free key at https://aistudio.google.com/apikey"
         )
     return genai.Client(api_key=api_key)
+
+
+def _call_gemini(client: genai.Client, prompt: str, max_retries: int = 2) -> str:
+    """Call Gemini with automatic retry on rate limit (429) errors."""
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=2000,
+                ),
+            )
+            return response.text
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries:
+                wait = 20 * (attempt + 1)  # 20s, then 40s
+                logger.warning(f"Gemini rate limited, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
+    return ""  # Should not reach here
 
 
 def rank_contributions(
@@ -74,18 +98,11 @@ Return ONLY valid JSON in this exact format, no other text:
   {{"speech_index": 3, "relevance": "brief explanation"}}
 ]}}"""
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.1,
-            max_output_tokens=2000,
-        ),
-    )
+    raw = _call_gemini(client, prompt)
 
     # Parse the response
     try:
-        response_text = response.text.strip()
+        response_text = raw.strip()
         # Handle markdown code blocks
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1]
@@ -94,7 +111,7 @@ Return ONLY valid JSON in this exact format, no other text:
         data = json.loads(response_text)
         ranked_indices = data.get("results", [])
     except (json.JSONDecodeError, AttributeError) as e:
-        logger.error(f"Failed to parse Gemini response: {e}\nResponse: {response.text}")
+        logger.error(f"Failed to parse Gemini response: {e}\nResponse: {raw}")
         return []
 
     # Map indices back to contributions
@@ -165,17 +182,10 @@ Return ONLY valid JSON in this exact format, no other text:
 
 If none are relevant, return: {{"matches": []}}"""
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.1,
-            max_output_tokens=2000,
-        ),
-    )
+    raw = _call_gemini(client, prompt)
 
     try:
-        response_text = response.text.strip()
+        response_text = raw.strip()
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1]
             response_text = response_text.rsplit("```", 1)[0]
@@ -183,7 +193,7 @@ If none are relevant, return: {{"matches": []}}"""
         data = json.loads(response_text)
         matches = data.get("matches", [])
     except (json.JSONDecodeError, AttributeError) as e:
-        logger.error(f"Failed to parse Gemini response: {e}\nResponse: {response.text}")
+        logger.error(f"Failed to parse Gemini response: {e}\nResponse: {raw}")
         return []
 
     output = []

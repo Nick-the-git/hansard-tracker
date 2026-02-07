@@ -72,31 +72,34 @@ if "selected_member" in st.session_state:
         unsafe_allow_html=True,
     )
 
-    topic = st.text_input(
-        "Topic",
-        placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times",
-    )
-
-    topic_context = st.text_area(
-        "What do you mean by this? (optional but helps accuracy)",
-        placeholder="e.g. I mean social investment as in impact investing, social enterprises, community interest companies — NOT general government spending on public services",
-        height=80,
-        help="Give the AI more context about what you're looking for. This is especially useful for ambiguous terms.",
-    )
-
-    col_num, col_fetch = st.columns(2)
-    with col_num:
-        num_results = st.number_input("Max results", min_value=1, max_value=20, value=10)
-    with col_fetch:
-        num_to_scan = st.selectbox(
-            "Speeches to scan",
-            options=[50, 100, 200, 500],
-            index=1,
-            format_func=lambda x: f"Last {x} speeches",
-            help="How many of their most recent speeches to scan for relevance. Higher = goes further back in time but takes longer.",
+    with st.form("search_form"):
+        topic = st.text_input(
+            "Topic",
+            placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times",
         )
 
-    if st.button("Search Hansard", type="primary", use_container_width=True):
+        topic_context = st.text_area(
+            "What do you mean by this? (optional but helps accuracy)",
+            placeholder="e.g. I mean social investment as in impact investing, social enterprises, community interest companies — NOT general government spending on public services",
+            height=80,
+            help="Give the AI more context about what you're looking for. This is especially useful for ambiguous terms.",
+        )
+
+        col_num, col_fetch = st.columns(2)
+        with col_num:
+            num_results = st.number_input("Max results", min_value=1, max_value=20, value=10)
+        with col_fetch:
+            num_to_scan = st.selectbox(
+                "Speeches to scan",
+                options=[50, 100, 200, 500],
+                index=1,
+                format_func=lambda x: f"Last {x} speeches",
+                help="How many of their most recent speeches to scan for relevance. Higher = goes further back in time but takes longer.",
+            )
+
+        search_submitted = st.form_submit_button("Search Hansard", type="primary", use_container_width=True)
+
+    if search_submitted:
         if not topic:
             st.warning("Please enter a topic to search for.")
         elif not os.getenv("GEMINI_API_KEY"):
@@ -117,7 +120,7 @@ if "selected_member" in st.session_state:
             if contributions:
                 # Step 2: Send to Gemini for ranking
                 gemini_error = False
-                with st.spinner(f"AI is reading {len(contributions)} speeches and finding ones about \"{topic}\" (may take up to a minute if rate limited)..."):
+                with st.spinner(f"AI is reading {len(contributions)} speeches and finding ones about \"{topic}\" (may take up to a minute)..."):
                     try:
                         results = rank_contributions(
                             contributions=contributions,

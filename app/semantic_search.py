@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import chromadb
@@ -10,7 +11,9 @@ from sentence_transformers import SentenceTransformer
 from app.hansard_client import Contribution
 
 
-# Use a lightweight but effective model for semantic similarity
+# all-MiniLM-L6-v2: 80MB, fast, decent quality
+# all-mpnet-base-v2: 420MB, slower, significantly better quality
+# For Streamlit Cloud (1GB RAM), MiniLM is the safer choice.
 MODEL_NAME = "all-MiniLM-L6-v2"
 
 # Singleton instances
@@ -28,7 +31,10 @@ def get_model() -> SentenceTransformer:
 def get_chroma_client() -> chromadb.PersistentClient:
     global _chroma_client
     if _chroma_client is None:
-        _chroma_client = chromadb.PersistentClient(path="./data/chromadb")
+        # Use a path that works both locally and on Streamlit Cloud
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chromadb")
+        os.makedirs(data_dir, exist_ok=True)
+        _chroma_client = chromadb.PersistentClient(path=data_dir)
     return _chroma_client
 
 
@@ -95,13 +101,16 @@ def index_contributions(member_id: int, contributions: list[Contribution]) -> in
 def semantic_query(member_id: int, query: str, top_k: int = 10) -> list[dict]:
     """
     Perform semantic search over a member's indexed contributions.
-    Returns a list of results with text, metadata, and similarity score.
+    Returns a list of results with text, metadata, and relevance rank.
     """
     client = get_chroma_client()
 
     try:
         collection = client.get_collection(name=_collection_name(member_id))
     except Exception:
+        return []
+
+    if collection.count() == 0:
         return []
 
     model = get_model()
@@ -127,6 +136,7 @@ def semantic_query(member_id: int, query: str, top_k: int = 10) -> list[dict]:
             "contribution_id": doc_id,
             "text": results["documents"][0][i],
             "similarity": round(similarity, 4),
+            "rank": i + 1,
             **results["metadatas"][0][i],
         })
 

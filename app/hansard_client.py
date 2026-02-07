@@ -71,18 +71,26 @@ def search_members(name: str, current_only: bool = True) -> list[Member]:
     return members
 
 
-def get_member_contributions(
+# Hansard API maximum per single request
+_API_PAGE_SIZE = 100
+
+# Minimum character length for a contribution to be worth indexing
+# Filters out procedural responses like "Yes" or "I agree"
+MIN_CONTRIBUTION_LENGTH = 100
+
+
+def _fetch_single_page(
     member_id: int,
+    take: int,
+    skip: int,
     search_term: Optional[str] = None,
-    take: int = 50,
-    skip: int = 0,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> list[Contribution]:
-    """Fetch spoken contributions for a member from the Hansard API."""
+    """Fetch a single page of contributions from the Hansard API."""
     params = {
         "queryParameters.memberId": member_id,
-        "queryParameters.take": take,
+        "queryParameters.take": min(take, _API_PAGE_SIZE),
         "queryParameters.skip": skip,
         "queryParameters.orderBy": "SittingDateDesc",
     }
@@ -122,6 +130,56 @@ def get_member_contributions(
             hansard_url=_build_hansard_url(house, sitting_date, debate_section_id, debate_title),
         ))
     return contributions
+
+
+def get_member_contributions(
+    member_id: int,
+    search_term: Optional[str] = None,
+    take: int = 50,
+    skip: int = 0,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    filter_short: bool = True,
+) -> list[Contribution]:
+    """
+    Fetch spoken contributions for a member from the Hansard API.
+    Automatically paginates if take > 100 (the API limit per request).
+    Filters out very short procedural contributions by default.
+    """
+    all_contributions = []
+    remaining = take
+    current_skip = skip
+
+    while remaining > 0:
+        page_size = min(remaining, _API_PAGE_SIZE)
+        page = _fetch_single_page(
+            member_id=member_id,
+            take=page_size,
+            skip=current_skip,
+            search_term=search_term,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        if not page:
+            break  # No more results from the API
+
+        all_contributions.extend(page)
+        current_skip += len(page)
+        remaining -= len(page)
+
+        # If we got fewer results than requested, we've hit the end
+        if len(page) < page_size:
+            break
+
+    # Filter out very short procedural contributions
+    if filter_short:
+        all_contributions = [
+            c for c in all_contributions
+            if len(c.text.strip()) >= MIN_CONTRIBUTION_LENGTH
+        ]
+
+    return all_contributions
 
 
 def get_latest_contributions(

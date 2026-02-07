@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import asyncio
+import smtplib
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -158,14 +157,10 @@ def _send_email_sync(
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    asyncio.run(aiosmtplib.send(
-        msg,
-        hostname=smtp_host,
-        port=smtp_port,
-        username=smtp_user,
-        password=smtp_password,
-        start_tls=True,
-    ))
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.send_message(msg)
     logger.info(f"Email notification sent to {to_email} about {member_name}")
 
 

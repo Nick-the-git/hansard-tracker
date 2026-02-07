@@ -78,21 +78,22 @@ if "selected_member" in st.session_state:
     with col_fetch:
         num_to_fetch = st.selectbox(
             "Speeches to index",
-            options=[100, 200, 500],
+            options=[100, 200, 300, 500],
             index=1,
-            format_func=lambda x: f"{x} ({'fast' if x == 100 else 'balanced' if x == 200 else 'thorough'})",
+            format_func=lambda x: f"{x} ({'fast' if x == 100 else 'balanced' if x == 200 else 'thorough' if x == 300 else 'very thorough — slower'})",
+            help="More speeches = better search results, but takes longer to fetch and index. The index is cached, so subsequent searches are fast.",
         )
 
     if st.button("Search Hansard", type="primary", use_container_width=True):
         if not topic:
             st.warning("Please enter a topic to search for.")
         else:
-            # Step 1: Fetch from Hansard
-            with st.spinner(f"Fetching {member.name}'s speeches from Hansard..."):
+            # Step 1: Fetch from Hansard (with pagination)
+            with st.spinner(f"Fetching {member.name}'s speeches from Hansard (this may take a moment for larger requests)..."):
                 try:
                     contributions = get_member_contributions(
                         member_id=member.id,
-                        take=min(num_to_fetch, 500),
+                        take=num_to_fetch,
                     )
                 except Exception as e:
                     st.error(f"Error fetching from Hansard API: {e}")
@@ -100,7 +101,7 @@ if "selected_member" in st.session_state:
 
             if contributions:
                 # Step 2: Index
-                with st.spinner(f"Indexing {len(contributions)} speeches (embedding model runs locally)..."):
+                with st.spinner(f"Indexing {len(contributions)} speeches..."):
                     indexed_count = index_contributions(member.id, contributions)
 
                 # Step 3: Semantic search
@@ -118,40 +119,37 @@ if "selected_member" in st.session_state:
                     st.markdown(f'### Results for "{topic}"')
                 with col_stats:
                     st.caption(
-                        f"{stats['indexed_count']} speeches indexed"
+                        f"{stats['indexed_count']} speeches indexed for {member.name}"
                         + (f" ({indexed_count} newly added)" if indexed_count > 0 else "")
                     )
 
                 if not results:
                     st.info("No results found. Try broadening your topic or indexing more speeches.")
                 else:
-                    for r in results:
-                        similarity = r["similarity"]
-                        if similarity >= 0.6:
-                            badge_color = "green"
-                        elif similarity >= 0.4:
-                            badge_color = "orange"
-                        else:
-                            badge_color = "gray"
+                    st.markdown(
+                        "*Results are ranked by semantic relevance — the most relevant speeches appear first.*"
+                    )
 
-                        sim_pct = round(similarity * 100)
+                    for r in results:
+                        rank = r.get("rank", 0)
                         date = r.get("sitting_date", "").split("T")[0] if r.get("sitting_date") else "Unknown"
                         text = r["text"]
                         display_text = text[:600] + "..." if len(text) > 600 else text
 
                         with st.container():
-                            col_title, col_sim = st.columns([5, 1])
-                            with col_title:
-                                st.markdown(f"**{r.get('debate_title', 'Unknown debate')}**")
-                            with col_sim:
+                            col_rank, col_content = st.columns([0.3, 5])
+                            with col_rank:
                                 st.markdown(
-                                    f'<span style="background:{badge_color}; color:white; '
-                                    f'padding:2px 8px; border-radius:3px; font-size:13px; '
-                                    f'font-weight:bold;">{sim_pct}% match</span>',
+                                    f'<div style="background:#1d70b8; color:white; '
+                                    f'width:36px; height:36px; border-radius:50%; '
+                                    f'display:flex; align-items:center; justify-content:center; '
+                                    f'font-weight:bold; font-size:16px; margin-top:4px;">{rank}</div>',
                                     unsafe_allow_html=True,
                                 )
+                            with col_content:
+                                st.markdown(f"**{r.get('debate_title', 'Unknown debate')}**")
+                                st.caption(f"{date} · {r.get('section', '')} · {r.get('house', '')}")
 
-                            st.caption(f"{date} · {r.get('section', '')} · {r.get('house', '')}")
                             st.markdown(display_text)
                             st.markdown(f"[Read full debate on Hansard →]({r.get('hansard_url', '#')})")
                             st.divider()

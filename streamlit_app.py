@@ -12,8 +12,8 @@ st.title("🏛️ Hansard Tracker")
 st.subheader("Track what MPs say in Parliament")
 
 st.markdown(
-    "Semantic search over Hansard records. Find what politicians have said about "
-    "any topic — not just keyword matches, but actual meaning."
+    "Search Hansard records to find what politicians have said about "
+    "any topic, and set up alerts to know when they speak."
 )
 
 st.divider()
@@ -21,11 +21,10 @@ st.divider()
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 🔍 Semantic Search")
+    st.markdown("### 🔍 Search")
     st.markdown(
-        'Search by meaning, not just keywords. Ask "what has this MP said about '
-        'the cost of living?" and find speeches about housing costs, energy bills, '
-        "food prices, and more."
+        "Search by topic to find what any MP or Lord has said in "
+        "Parliament. Results link directly to the official Hansard record."
     )
     st.page_link("pages/1_Search.py", label="Search Hansard →", icon="🔍")
 

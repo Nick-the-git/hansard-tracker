@@ -1,8 +1,8 @@
 """Hansard Tracker — Semantic Search page."""
 
 import streamlit as st
-from app.hansard_client import search_members, get_member_contributions
-from app.semantic_search import index_contributions, semantic_query, get_index_stats
+from app.hansard_client import search_members
+from app.search import hybrid_search
 
 st.set_page_config(page_title="Search — Hansard Tracker", page_icon="🔍", layout="wide")
 
@@ -68,49 +68,40 @@ if "selected_member" in st.session_state:
     )
 
     topic = st.text_input(
-        "Describe the topic in plain language — this is semantic search, not keyword matching",
-        placeholder="e.g. cost of living crisis, housing affordability, NHS waiting times",
+        "Describe the topic — use a few keywords or a short phrase",
+        placeholder="e.g. artificial intelligence, housing crisis, NHS waiting times, climate change",
     )
 
-    col_num, col_fetch = st.columns(2)
+    col_num, col_pool = st.columns(2)
     with col_num:
         num_results = st.number_input("Number of results", min_value=1, max_value=50, value=10)
-    with col_fetch:
-        num_to_fetch = st.selectbox(
-            "Speeches to index",
-            options=[100, 200, 300, 500],
+    with col_pool:
+        keyword_pool = st.selectbox(
+            "Search depth",
+            options=[50, 100, 200],
             index=1,
-            format_func=lambda x: f"{x} ({'fast' if x == 100 else 'balanced' if x == 200 else 'thorough' if x == 300 else 'very thorough — slower'})",
-            help="More speeches = better search results, but takes longer to fetch and index. The index is cached, so subsequent searches are fast.",
+            format_func=lambda x: f"{x} speeches ({'fast' if x == 50 else 'balanced' if x == 100 else 'thorough'})",
+            help="How many keyword-matched speeches to retrieve from Hansard before semantic re-ranking.",
         )
 
     if st.button("Search Hansard", type="primary", use_container_width=True):
         if not topic:
             st.warning("Please enter a topic to search for.")
         else:
-            # Step 1: Fetch from Hansard (with pagination)
-            with st.spinner(f"Fetching {member.name}'s speeches from Hansard (this may take a moment for larger requests)..."):
+            with st.spinner(f"Searching Hansard for {member.name}'s speeches on \"{topic}\"..."):
                 try:
-                    contributions = get_member_contributions(
+                    data = hybrid_search(
                         member_id=member.id,
-                        take=num_to_fetch,
+                        topic=topic,
+                        num_results=num_results,
+                        keyword_pool_size=keyword_pool,
                     )
                 except Exception as e:
-                    st.error(f"Error fetching from Hansard API: {e}")
-                    contributions = []
+                    st.error(f"Error searching: {e}")
+                    data = None
 
-            if contributions:
-                # Step 2: Index
-                with st.spinner(f"Indexing {len(contributions)} speeches..."):
-                    indexed_count = index_contributions(member.id, contributions)
-
-                # Step 3: Semantic search
-                with st.spinner("Performing semantic search..."):
-                    results = semantic_query(member.id, topic, top_k=num_results)
-
-                stats = get_index_stats(member.id)
-
-                # ─── Display results ─────────────────────────────────────
+            if data:
+                results = data["results"]
 
                 st.divider()
 
@@ -119,19 +110,18 @@ if "selected_member" in st.session_state:
                     st.markdown(f'### Results for "{topic}"')
                 with col_stats:
                     st.caption(
-                        f"{stats['indexed_count']} speeches indexed for {member.name}"
-                        + (f" ({indexed_count} newly added)" if indexed_count > 0 else "")
+                        f"Found {data['keyword_matches']} matching speeches in Hansard, "
+                        f"showing top {len(results)} by relevance"
                     )
 
                 if not results:
-                    st.info("No results found. Try broadening your topic or indexing more speeches.")
-                else:
-                    st.markdown(
-                        "*Results are ranked by semantic relevance — the most relevant speeches appear first.*"
+                    st.info(
+                        f"No speeches found where **{member.name}** discussed \"{topic}\". "
+                        f"Try different keywords or a broader topic."
                     )
-
+                else:
                     for r in results:
-                        rank = r.get("rank", 0)
+                        rank = r["rank"]
                         date = r.get("sitting_date", "").split("T")[0] if r.get("sitting_date") else "Unknown"
                         text = r["text"]
                         display_text = text[:600] + "..." if len(text) > 600 else text
@@ -153,5 +143,3 @@ if "selected_member" in st.session_state:
                             st.markdown(display_text)
                             st.markdown(f"[Read full debate on Hansard →]({r.get('hansard_url', '#')})")
                             st.divider()
-            else:
-                st.warning("No contributions found for this member. They may not have recent Hansard records.")
